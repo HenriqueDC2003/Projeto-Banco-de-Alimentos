@@ -1,9 +1,37 @@
 import axios from 'axios'
+import { authService } from './auth'
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL,
   headers: { 'Content-Type': 'application/json' }
 })
+
+// Interceptor para adicionar token JWT em todas requisições
+api.interceptors.request.use(
+  (config) => {
+    const token = authService.getToken()
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    return config
+  },
+  (error) => {
+    return Promise.reject(error)
+  }
+)
+
+// Interceptor para tratar erros de autenticação
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      // Token expirado ou inválido
+      authService.logout()
+      window.location.href = '/login'
+    }
+    return Promise.reject(error)
+  }
+)
 
 export const alimentosApi = {
   listar: () => api.get('/alimentos'),
@@ -34,4 +62,8 @@ export const auxiliaresApi = {
   criarParceiro: (data) => api.post('/parceiros', data)
 }
 
-export default api
+export const usuariosApi = {
+  listar: () => api.get('/usuarios'),
+  criar: (data) => api.post('/usuarios', data),
+  deletar: (id) => api.delete(`/usuarios/${id}`)
+}
