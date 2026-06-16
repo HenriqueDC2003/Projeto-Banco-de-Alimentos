@@ -17,7 +17,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(__file__))
 
 from models import Base, Usuario
-from security import hash_senha
+from auth import hash_senha
 
 # Configurar banco de dados
 DATABASE_URL = os.getenv("DATABASE_URL")
