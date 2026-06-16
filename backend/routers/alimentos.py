@@ -1,13 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from database import get_db
-from models import Alimento
 from pydantic import BaseModel
 from typing import Optional
 import uuid
 
-router = APIRouter()
+from database import get_db
+from models import Alimento, Usuario
+from auth import get_usuario_atual, exigir_admin
 
+router = APIRouter(prefix="/alimentos", tags=["Alimentos"])
+
+
+# ── Schema ─────────────────────────────────────────────────────────────────────
 
 class AlimentoSchema(BaseModel):
     nome: str
@@ -20,21 +24,34 @@ class AlimentoSchema(BaseModel):
         from_attributes = True
 
 
-@router.get("/alimentos")
-def listar(db: Session = Depends(get_db)):
-    return db.query(Alimento).all()
+# ── Endpoints ──────────────────────────────────────────────────────────────────
+
+@router.get("/")
+def listar(
+    _: Usuario = Depends(get_usuario_atual),
+    db: Session = Depends(get_db),
+):
+    return db.query(Alimento).order_by(Alimento.nome).all()
 
 
-@router.get("/alimentos/{id}")
-def buscar(id: uuid.UUID, db: Session = Depends(get_db)):
+@router.get("/{id}")
+def buscar(
+    id: uuid.UUID,
+    _: Usuario = Depends(get_usuario_atual),
+    db: Session = Depends(get_db),
+):
     a = db.query(Alimento).filter(Alimento.id == id).first()
     if not a:
         raise HTTPException(404, "Alimento não encontrado")
     return a
 
 
-@router.post("/alimentos")
-def criar(data: AlimentoSchema, db: Session = Depends(get_db)):
+@router.post("/", status_code=201)
+def criar(
+    data: AlimentoSchema,
+    _: Usuario = Depends(get_usuario_atual),
+    db: Session = Depends(get_db),
+):
     alimento = Alimento(**data.model_dump())
     db.add(alimento)
     db.commit()
@@ -42,8 +59,13 @@ def criar(data: AlimentoSchema, db: Session = Depends(get_db)):
     return alimento
 
 
-@router.put("/alimentos/{id}")
-def atualizar(id: uuid.UUID, data: AlimentoSchema, db: Session = Depends(get_db)):
+@router.put("/{id}")
+def atualizar(
+    id: uuid.UUID,
+    data: AlimentoSchema,
+    _: Usuario = Depends(get_usuario_atual),
+    db: Session = Depends(get_db),
+):
     a = db.query(Alimento).filter(Alimento.id == id).first()
     if not a:
         raise HTTPException(404, "Alimento não encontrado")
@@ -54,8 +76,12 @@ def atualizar(id: uuid.UUID, data: AlimentoSchema, db: Session = Depends(get_db)
     return a
 
 
-@router.delete("/alimentos/{id}")
-def deletar(id: uuid.UUID, db: Session = Depends(get_db)):
+@router.delete("/{id}")
+def deletar(
+    id: uuid.UUID,
+    _: Usuario = Depends(exigir_admin),   # só admin pode deletar alimento
+    db: Session = Depends(get_db),
+):
     a = db.query(Alimento).filter(Alimento.id == id).first()
     if not a:
         raise HTTPException(404, "Alimento não encontrado")

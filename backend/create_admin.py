@@ -5,7 +5,7 @@ Execute fora do servidor FastAPI.
 Uso:
     python backend/create_admin.py
 """
-
+from typing import Any
 import os
 import sys
 from sqlalchemy import create_engine
@@ -17,7 +17,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(__file__))
 
 from models import Base, Usuario
-from auth import hash_senha
+from security import hash_senha
 
 # Configurar banco de dados
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -58,7 +58,9 @@ def criar_admin():
     
     try:
         # Verificar se já existe usuário com esse email
-        usuario_existente = db.query(Usuario).filter(Usuario.email == email).first()
+        # Mudamos a tipagem para Any para o VS Code não chiar com o SQLAlchemy
+        usuario_existente: Any = db.query(Usuario).filter(Usuario.email == email).first()
+        
         if usuario_existente:
             if usuario_existente.nivel != "admin":
                 usuario_existente.nivel = "admin"
@@ -66,12 +68,6 @@ def criar_admin():
                 db.commit()
                 db.refresh(usuario_existente)
             print(f"Usuário '{email}' já existe; garantindo nível admin.")
-            return True
-
-        # Verificar se já existe algum admin
-        admin_existente = db.query(Usuario).filter(Usuario.nivel == "admin").first()
-        if admin_existente:
-            print("Aviso: Já existe um usuário admin no sistema. Nenhuma ação adicional foi feita.")
             return True
         
         # Criar novo admin

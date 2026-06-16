@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from typing import List
 import uuid
 
@@ -10,6 +10,10 @@ from auth import hash_senha, get_usuario_atual, exigir_admin
 
 router = APIRouter(prefix="/usuarios", tags=["Usuários"])
 
+NIVEIS_VALIDOS = {"admin", "operador"}
+
+
+# ── Schemas ────────────────────────────────────────────────────────────────────
 
 class UsuarioCreate(BaseModel):
     nome: str
@@ -33,82 +37,71 @@ class UsuarioOut(BaseModel):
         from_attributes = True
 
 
+# ── Endpoints ──────────────────────────────────────────────────────────────────
+
 @router.get("/", response_model=List[UsuarioOut])
 def listar_usuarios(
-    admin: Usuario = Depends(exigir_admin),
-    db: Session = Depends(get_db)
+    _: Usuario = Depends(exigir_admin),
+    db: Session = Depends(get_db),
 ):
-    """
-    Lista todos os usuários. Apenas admin pode acessar.
-    """
-    usuarios = db.query(Usuario).all()
-    return usuarios
+    return db.query(Usuario).order_by(Usuario.nome).all()
 
 
-@router.post("/", response_model=UsuarioOut)
+@router.post("/", response_model=UsuarioOut, status_code=201)
 def criar_usuario(
     usuario_data: UsuarioCreate,
-    admin: Usuario = Depends(exigir_admin),
-    db: Session = Depends(get_db)
+    _: Usuario = Depends(exigir_admin),
+    db: Session = Depends(get_db),
 ):
-    """
-    Cria um novo usuário. Apenas admin pode criar.
-    """
-    # Verificar se e-mail já existe
-    usuario_existente = db.query(Usuario).filter(Usuario.email == usuario_data.email).first()
-    if usuario_existente:
+    if usuario_data.nivel not in NIVEIS_VALIDOS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Nível inválido. Valores aceitos: {', '.join(NIVEIS_VALIDOS)}",
+        )
+
+    if db.query(Usuario).filter(
+        Usuario.email == usuario_data.email.lower().strip()
+    ).first():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="E-mail já registrado",
         )
-    
-    # Validar nível
-    if usuario_data.nivel not in ["admin", "operador"]:
+
+    if len(usuario_data.senha) < 6:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Nível deve ser 'admin' ou 'operador'",
+            detail="Senha deve ter pelo menos 6 caracteres",
         )
-    
-    # Criar novo usuário
-    novo_usuario = Usuario(
-        nome=usuario_data.nome,
-        sobrenome=usuario_data.sobrenome,
-        email=usuario_data.email,
+
+    novo = Usuario(
+        nome=usuario_data.nome.strip(),
+        sobrenome=usuario_data.sobrenome.strip(),
+        email=usuario_data.email.lower().strip(),
         senha_hash=hash_senha(usuario_data.senha),
         nivel=usuario_data.nivel,
     )
-    
-    db.add(novo_usuario)
+    db.add(novo)
     db.commit()
-    db.refresh(novo_usuario)
-    
-    return novo_usuario
+    db.refresh(novo)
+    return novo
 
 
 @router.delete("/{usuario_id}")
 def deletar_usuario(
     usuario_id: uuid.UUID,
     admin: Usuario = Depends(exigir_admin),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    """
-    Deleta um usuário. Apenas admin pode deletar.
-    """
-    usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
-    
-    if not usuario:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Usuário não encontrado",
-        )
-    
-    if usuario.id == admin.id:
+    if usuario_id == admin.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Você não pode deletar sua própria conta",
         )
-    
+
+    usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
+    if not usuario:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
+
     db.delete(usuario)
     db.commit()
-    
     return {"mensagem": "Usuário deletado com sucesso"}
