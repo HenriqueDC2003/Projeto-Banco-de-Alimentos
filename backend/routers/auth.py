@@ -1,121 +1,81 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordRequestForm
+import os
+from fastapi import APIRouter, Depends, HTTPException, status, Header
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, EmailStr
-import uuid
+from pydantic import BaseModel
+from jose import jwt, JWTError
+from passlib.context import CryptContext
 
 from database import get_db
 from models import Usuario
-from auth import (
-    hash_senha,
-    verificar_senha,
-    criar_token_jwt,
-    get_usuario_atual,
-)
+
+# 1. Configurações simplificadas (com valor padrão para não quebrar a API)
+SECRET_KEY = os.getenv("SECRET_KEY", "chave_super_secreta_banco_alimentos")
+ALGORITHM = "HS256"
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 router = APIRouter(prefix="/auth", tags=["Autenticação"])
 
-
-# ── Schemas ────────────────────────────────────────────────────────────────────
-
-class LoginResponse(BaseModel):
-    access_token: str
-    token_type: str
-    usuario: dict
-
-    class Config:
-        from_attributes = True
-
-
-class UsuarioOut(BaseModel):
-    id: uuid.UUID
-    nome: str
-    sobrenome: str
+# 2. Schemas básicos
+class LoginRequest(BaseModel):
     email: str
-    nivel: str
+    senha: str
 
-    class Config:
-        from_attributes = True
+# 3. Funções de apoio
+def hash_senha(senha: str) -> str:
+    return pwd_context.hash(senha)
 
+def verificar_senha(senha_plana: str, senha_hash: str) -> bool:
+    return pwd_context.verify(senha_plana, senha_hash)
 
-class AlterarSenhaBody(BaseModel):
-    """
-    Body para POST /auth/alterar-senha.
-    Anteriormente recebia como query params — corrigido para JSON body.
-    """
-    senha_atual: str
-    senha_nova: str
+# 4. Dependência para proteger as rotas
+def get_usuario_atual(authorization: str = Header(None), db: Session = Depends(get_db)) -> Usuario:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Token ausente ou mal formatado")
+    
+    token = authorization.replace("Bearer ", "")
+    
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        usuario_id = payload.get("id")
+        if not usuario_id:
+            raise ValueError()
+    except (JWTError, ValueError):
+        raise HTTPException(status_code=401, detail="Token inválido")
 
+    usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
+    if not usuario:
+        raise HTTPException(status_code=401, detail="Usuário não encontrado")
+        
+    return usuario
 
-# ── Endpoints ──────────────────────────────────────────────────────────────────
+# 5. Endpoints
+@router.post("/login")
+def login(dados: LoginRequest, db: Session = Depends(get_db)):
+    # Busca o usuário pelo email enviado no JSON
+    usuario = db.query(Usuario).filter(Usuario.email == dados.email.lower().strip()).first()
 
-@router.post("/login", response_model=LoginResponse)
-def login(
-    form_data: OAuth2PasswordRequestForm = Depends(),
-    db: Session = Depends(get_db),
-):
-    """
-    Login com e-mail e senha (OAuth2 form: username=email, password=senha).
-    Retorna JWT + dados do usuário.
-    """
-    usuario = db.query(Usuario).filter(
-        Usuario.email == form_data.username.lower().strip()
-    ).first()
+    # Verifica a senha
+    if not usuario or not verificar_senha(dados.senha, usuario.senha_hash):
+        raise HTTPException(status_code=401, detail="E-mail ou senha inválidos")
 
-    if not usuario or not verificar_senha(form_data.password, usuario.senha_hash):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="E-mail ou senha inválidos",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    token = criar_token_jwt({"sub": str(usuario.id)})
+    # Gera um token simples que não expira (adequado para 3 usuários fixos)
+    token = jwt.encode({"id": str(usuario.id)}, SECRET_KEY, algorithm=ALGORITHM)
 
     return {
         "access_token": token,
-        "token_type": "bearer",
         "usuario": {
             "id": str(usuario.id),
             "nome": usuario.nome,
-            "sobrenome": usuario.sobrenome,
             "email": usuario.email,
-            "nivel": usuario.nivel,
-        },
+            "nivel": usuario.nivel
+        }
     }
 
-
-@router.post("/alterar-senha")
-def alterar_senha(
-    body: AlterarSenhaBody,                         # ← body JSON, não query params
-    usuario: Usuario = Depends(get_usuario_atual),
-    db: Session = Depends(get_db),
-):
-    """
-    Altera a senha do usuário logado.
-    Requer autenticação via Bearer token.
-
-    Body JSON:
-        { "senha_atual": "...", "senha_nova": "..." }
-    """
-    if not verificar_senha(body.senha_atual, usuario.senha_hash):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Senha atual inválida",
-        )
-
-    if len(body.senha_nova) < 6:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A nova senha deve ter pelo menos 6 caracteres",
-        )
-
-    usuario.senha_hash = hash_senha(body.senha_nova)
-    db.commit()
-
-    return {"mensagem": "Senha alterada com sucesso"}
-
-
-@router.get("/me", response_model=UsuarioOut)
-def obter_usuario_atual(usuario: Usuario = Depends(get_usuario_atual)):
-    """Retorna os dados do usuário autenticado."""
-    return usuario
+@router.get("/me")
+def obter_usuario_atual_rota(usuario: Usuario = Depends(get_usuario_atual)):
+    return {
+        "id": str(usuario.id),
+        "nome": usuario.nome,
+        "email": usuario.email,
+        "nivel": usuario.nivel
+    }
