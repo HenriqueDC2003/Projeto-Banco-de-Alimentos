@@ -6,7 +6,7 @@ import uuid
 
 from database import get_db
 from models import Tipo, Marca, Unidade, Parceiro, PontoColeta, EntidadeBeneficiaria, Usuario
-from auth import get_usuario_atual, exigir_admin
+from security import get_usuario_atual, exigir_admin
 
 router = APIRouter(tags=["Auxiliares"])
 

@@ -7,7 +7,7 @@ import uuid
 
 from database import get_db
 from models import Distribuicao, Lote, Usuario
-from auth import get_usuario_atual
+from security import get_usuario_atual
 from ws_manager import manager
 
 router = APIRouter(prefix="/distribuicoes", tags=["Distribuições"])

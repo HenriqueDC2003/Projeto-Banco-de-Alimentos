@@ -23,7 +23,7 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, status
 from jose import JWTError, jwt
 
-from auth import SECRET_KEY, ALGORITHM
+from security import SECRET_KEY, ALGORITHM
 from database import SessionLocal
 from models import Usuario
 from ws_manager import manager

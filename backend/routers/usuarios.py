@@ -6,7 +6,7 @@ import uuid
 
 from database import get_db
 from models import Usuario
-from auth import hash_senha, get_usuario_atual, exigir_admin
+from security import hash_senha, get_usuario_atual, exigir_admin
 
 router = APIRouter(prefix="/usuarios", tags=["Usuários"])
 
